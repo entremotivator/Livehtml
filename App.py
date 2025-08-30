@@ -1675,65 +1675,72 @@ if __name__ == "__main__":
     return python_script
 
 def clean_html_for_download(html_content, remove_download_buttons=True):
-    """Clean and structure HTML for download with embedded CSS"""
+    """Clean and structure HTML for download with properly embedded CSS"""
     import re
     
-    # Remove download buttons if requested
+    # Remove download buttons and scripts if requested
     if remove_download_buttons:
         html_content = re.sub(r'<button[^>]*download-btn[^>]*>.*?</button>', '', html_content, flags=re.DOTALL)
-        html_content = re.sub(r'<script[^>]*>.*?downloadPDF$$$$.*?</script>', '', html_content, flags=re.DOTALL)
+        html_content = re.sub(r'<script[^>]*>.*?</script>', '', html_content, flags=re.DOTALL)
     
     # Extract CSS from style tags
     css_pattern = r'<style[^>]*>(.*?)</style>'
     css_matches = re.findall(css_pattern, html_content, re.DOTALL)
     
-    # Remove original style tags
+    # Remove original style tags from content
     html_content = re.sub(css_pattern, '', html_content, flags=re.DOTALL)
     
-    # Combine all CSS
+    # Combine and clean CSS
     combined_css = '\n'.join(css_matches)
+    combined_css = re.sub(r'/\*.*?\*/', '', combined_css, flags=re.DOTALL)  # Remove comments
+    combined_css = re.sub(r'\s+', ' ', combined_css).strip()  # Minify
     
-    # Clean up CSS (remove comments, minify)
-    combined_css = re.sub(r'/\*.*?\*/', '', combined_css, flags=re.DOTALL)
-    combined_css = re.sub(r'\s+', ' ', combined_css).strip()
-    
-    # Ensure proper HTML structure with embedded CSS
+    # Create proper HTML structure with embedded CSS
     if not html_content.strip().startswith('<!DOCTYPE html>'):
-        if '<html>' not in html_content:
-            # Create clean HTML structure with embedded CSS
+        # Extract body content
+        body_match = re.search(r'<body[^>]*>(.*?)</body>', html_content, re.DOTALL)
+        if body_match:
+            body_content = body_match.group(1)
+        else:
             body_content = html_content
-            html_content = f"""<!DOCTYPE html>
+        
+        # Create clean HTML structure
+        html_content = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Downloaded Content</title>
-    <style>{combined_css}</style>
+    <style>
+        {combined_css}
+    </style>
 </head>
 <body>
 {body_content}
 </body>
 </html>"""
-        else:
-            # Insert CSS into existing HTML structure
-            if '<head>' in html_content and combined_css:
-                html_content = html_content.replace('</head>', f'    <style>{combined_css}</style>\n</head>')
+    else:
+        # Insert CSS into existing HTML structure
+        if '<head>' in html_content and combined_css:
+            head_end = html_content.find('</head>')
+            if head_end != -1:
+                html_content = html_content[:head_end] + f'    <style>\n        {combined_css}\n    </style>\n' + html_content[head_end:]
     
     return html_content
 
 def generate_pdf_from_html(html_content, title="Document"):
-    """Generate PDF from HTML with proper CSS rendering"""
+    """Generate PDF from HTML with enhanced CSS rendering"""
     try:
         from reportlab.lib.pagesizes import A4
-        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
         from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
         from reportlab.lib.units import inch
-        from reportlab.lib.colors import HexColor
+        from reportlab.lib.colors import HexColor, black, blue
         from io import BytesIO
         import re
         from html.parser import HTMLParser
         
-        class EnhancedHTMLToPDFParser(HTMLParser):
+        class AdvancedHTMLToPDFParser(HTMLParser):
             def __init__(self):
                 super().__init__()
                 self.content = []
@@ -1743,7 +1750,8 @@ def generate_pdf_from_html(html_content, title="Document"):
                 self.in_title = False
                 self.in_header = False
                 self.header_level = 0
-                self.css_styles = {}
+                self.in_paragraph = False
+                self.text_style = 'normal'
                 
             def handle_starttag(self, tag, attrs):
                 if tag == 'style':
@@ -1751,17 +1759,23 @@ def generate_pdf_from_html(html_content, title="Document"):
                 elif tag == 'script':
                     self.in_script = True
                 elif tag in ['h1', 'h2', 'h3', 'h4', 'h5', 'h6']:
+                    self._flush_current_text()
                     self.in_header = True
                     self.header_level = int(tag[1])
                 elif tag == 'title':
                     self.in_title = True
-                elif tag in ['p', 'div', 'br']:
-                    if self.current_text.strip():
-                        self.content.append(('text', self.current_text.strip()))
-                        self.current_text = ""
-                    if tag == 'br':
-                        self.content.append(('break', ''))
-                        
+                elif tag == 'p':
+                    self._flush_current_text()
+                    self.in_paragraph = True
+                elif tag in ['strong', 'b']:
+                    self.text_style = 'bold'
+                elif tag in ['em', 'i']:
+                    self.text_style = 'italic'
+                elif tag == 'br':
+                    self.content.append(('break', ''))
+                elif tag == 'hr':
+                    self.content.append(('line', ''))
+                    
             def handle_endtag(self, tag):
                 if tag == 'style':
                     self.in_style = False
@@ -1775,42 +1789,46 @@ def generate_pdf_from_html(html_content, title="Document"):
                     self.header_level = 0
                 elif tag == 'title':
                     self.in_title = False
-                elif tag in ['p', 'div']:
-                    if self.current_text.strip():
-                        self.content.append(('text', self.current_text.strip()))
-                        self.current_text = ""
-                        
+                elif tag == 'p':
+                    self._flush_current_text()
+                    self.in_paragraph = False
+                elif tag in ['strong', 'b', 'em', 'i']:
+                    self.text_style = 'normal'
+                    
             def handle_data(self, data):
                 if not self.in_style and not self.in_script and not self.in_title:
                     self.current_text += data
                     
-            def get_content(self):
+            def _flush_current_text(self):
                 if self.current_text.strip():
-                    self.content.append(('text', self.current_text.strip()))
+                    self.content.append(('text', self.current_text.strip(), self.text_style))
+                    self.current_text = ""
+                    
+            def get_content(self):
+                self._flush_current_text()
                 return self.content
         
-        # Create a BytesIO buffer
+        # Create PDF buffer
         buffer = BytesIO()
-        
-        # Create PDF document
-        doc = SimpleDocTemplate(buffer, pagesize=A4, topMargin=1*inch)
+        doc = SimpleDocTemplate(buffer, pagesize=A4, topMargin=1*inch, bottomMargin=1*inch)
         styles = getSampleStyleSheet()
         story = []
         
+        # Enhanced styles
         title_style = ParagraphStyle(
             'CustomTitle',
             parent=styles['Heading1'],
-            fontSize=20,
+            fontSize=22,
             spaceAfter=30,
-            textColor=HexColor('#2c3e50'),
-            alignment=1,  # Center alignment
+            textColor=HexColor('#1a365d'),
+            alignment=1,
             fontName='Helvetica-Bold'
         )
         
         header_styles = {
-            1: ParagraphStyle('Header1', parent=styles['Heading1'], fontSize=16, spaceAfter=20, textColor=HexColor('#34495e'), fontName='Helvetica-Bold'),
-            2: ParagraphStyle('Header2', parent=styles['Heading2'], fontSize=14, spaceAfter=15, textColor=HexColor('#34495e'), fontName='Helvetica-Bold'),
-            3: ParagraphStyle('Header3', parent=styles['Heading3'], fontSize=12, spaceAfter=12, textColor=HexColor('#34495e'), fontName='Helvetica-Bold'),
+            1: ParagraphStyle('Header1', parent=styles['Heading1'], fontSize=18, spaceAfter=20, textColor=HexColor('#2d3748'), fontName='Helvetica-Bold'),
+            2: ParagraphStyle('Header2', parent=styles['Heading2'], fontSize=16, spaceAfter=15, textColor=HexColor('#4a5568'), fontName='Helvetica-Bold'),
+            3: ParagraphStyle('Header3', parent=styles['Heading3'], fontSize=14, spaceAfter=12, textColor=HexColor('#4a5568'), fontName='Helvetica-Bold'),
         }
         
         body_style = ParagraphStyle(
@@ -1818,9 +1836,15 @@ def generate_pdf_from_html(html_content, title="Document"):
             parent=styles['Normal'],
             fontSize=11,
             spaceAfter=12,
-            textColor=HexColor('#2c3e50'),
+            textColor=HexColor('#2d3748'),
             leading=16,
             fontName='Helvetica'
+        )
+        
+        bold_style = ParagraphStyle(
+            'BoldText',
+            parent=body_style,
+            fontName='Helvetica-Bold'
         )
         
         # Add title
@@ -1828,27 +1852,30 @@ def generate_pdf_from_html(html_content, title="Document"):
         story.append(Spacer(1, 20))
         
         # Parse HTML content
-        parser = EnhancedHTMLToPDFParser()
+        parser = AdvancedHTMLToPDFParser()
         parser.feed(html_content)
         content_items = parser.get_content()
         
         # Convert parsed content to PDF elements
         for item in content_items:
             if item[0] == 'header':
-                level = min(item[2], 3)  # Cap at h3
+                level = min(item[2], 3)
                 style = header_styles.get(level, header_styles[3])
                 story.append(Paragraph(item[1], style))
+                story.append(Spacer(1, 10))
             elif item[0] == 'text':
-                # Clean up text and add as paragraph
                 clean_text = item[1].replace('&nbsp;', ' ').replace('&amp;', '&').replace('&lt;', '<').replace('&gt;', '>')
-                if clean_text.strip() and len(clean_text.strip()) > 3:  # Filter out very short text
-                    story.append(Paragraph(clean_text, body_style))
+                if clean_text.strip() and len(clean_text.strip()) > 2:
+                    text_style = bold_style if len(item) > 2 and item[2] == 'bold' else body_style
+                    story.append(Paragraph(clean_text, text_style))
             elif item[0] == 'break':
                 story.append(Spacer(1, 8))
+            elif item[0] == 'line':
+                story.append(Spacer(1, 12))
         
-        # If no meaningful content was parsed, add a message
-        if not content_items or len([item for item in content_items if item[0] in ['text', 'header']]) == 0:
-            story.append(Paragraph("This document contains primarily visual content that is best viewed in HTML format.", body_style))
+        # Fallback if no content parsed
+        if not content_items:
+            story.append(Paragraph("This document contains primarily visual content. Please view the HTML version for the complete experience.", body_style))
         
         # Build PDF
         doc.build(story)
