@@ -1475,7 +1475,7 @@ if data_source == "📋 Demo Examples":
 else:
     sheet_url = st.sidebar.text_input(
         "Google Sheet CSV URL:",
-        value="https://docs.google.com/spreadsheets/d/1hBPTl0qzmpLGb9nJHJaK0ZogBs-dbhqoDOp1VVj8RgY/export?format=csv",
+        value="https://docs.google.com/spreadsheets/d/1eFZcnDoGT2NJHaEQSgxW5psN5kvlkYx1vtuXGRFTGTk/export?format=csv",
         help="Enter the CSV export URL of your Google Sheet. Required columns: Number, Code. Optional: Title, Category, Description, PDF_Enabled"
     )
     
