@@ -1607,7 +1607,7 @@ if data_source == "📋 Demo Examples":
 else:
     sheet_url = st.sidebar.text_input(
         "Google Sheet CSV URL:",
-        value="https://docs.google.com/spreadsheets/d/1hBPTl0qzmpLGb9nJHJaK0ZogBs-dbhqoDOp1VVj8RgY/export?format=csv",
+        value="https://docs.google.com/spreadsheets/d/1eFZcnDoGT2NJHaEQSgxW5psN5kvlkYx1vtuXGRFTGTk/export?format=csv",
         help="Enter the CSV export URL of your Google Sheet. Required columns: Number, Code. Optional: Title, Category, Description, PDF_Enabled"
     )
     
@@ -1661,7 +1661,7 @@ else:
                     'title': row_data.get('Title', f"Item {selected_number}"),
                     'category': row_data.get('Category', 'Custom'),
                     'description': row_data.get('Description', 'Custom HTML/CSS code from Google Sheets'),
-                    'pdf_enabled': row_data.get('PDF_Enabled', False)
+                    'pdf_enabled': True
                 }
             else:
                 current_code = "<p>No code available for this number</p>"
@@ -1867,20 +1867,18 @@ if example_info:
         col1, col2 = st.columns([1, 1])
     
     with col1:
-        # PDF download (only for PDF-enabled examples)
-        if example_info.get('pdf_enabled') or (isinstance(example_info.get('pdf_enabled'), str) and example_info.get('pdf_enabled').lower() == 'true'):
-            pdf_data = generate_pdf_from_html(current_code, example_info['title'])
-            if pdf_data:
-                st.download_button(
-                    label="📄 Download PDF",
-                    data=pdf_data,
-                    file_name=f"{example_info['title'].replace(' ', '_')}.pdf",
-                    mime="application/pdf",
-                    help="Download as formatted PDF with styling applied"
-                )
-            else:
-                if st.button("📄 Download PDF"):
-                    st.error("PDF generation requires reportlab package")
+        pdf_data = generate_pdf_from_html(current_code, example_info['title'])
+        if pdf_data:
+            st.download_button(
+                label="📄 Download PDF",
+                data=pdf_data,
+                file_name=f"{example_info['title'].replace(' ', '_')}.pdf",
+                mime="application/pdf",
+                help="Download as formatted PDF with styling applied"
+            )
+        else:
+            if st.button("📄 Download PDF"):
+                st.error("PDF generation requires reportlab package")
         else:
             st.write("")  # Empty space for alignment
     
@@ -1994,10 +1992,10 @@ with st.expander("📖 Instructions & Tips", expanded=False):
         - **Title** (optional): Display name
         - **Category** (optional): Group classification
         - **Description** (optional): Brief description
-        - **PDF_Enabled** (optional): true/false for PDF download capability
+        - **PDF_Enabled** (optional): Not required - PDF download available for all entries
         
         **Real Downloads:**
-        - **PDF Downloads**: Generate actual PDF files from HTML content
+        - **PDF Downloads**: Generate actual PDF files from HTML content (available for ALL entries)
         - **HTML Downloads**: Save HTML/CSS code directly
         - **Streamlit Integration**: Uses native download functionality
         """
@@ -2020,4 +2018,3 @@ function downloadPDF() {
 }
 </script>
 """, unsafe_allow_html=True)
-
