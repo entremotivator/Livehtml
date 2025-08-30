@@ -1506,8 +1506,11 @@ st.markdown(
     unsafe_allow_html=True
 )
 
+st.markdown("""
 <script>
 function downloadPDF() {
     alert('PDF download feature would be implemented with server-side PDF generation');
 }
 </script>
+""", unsafe_allow_html=True)
+
