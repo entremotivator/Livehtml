@@ -1475,7 +1475,7 @@ if data_source == "📋 Demo Examples":
 else:
     sheet_url = st.sidebar.text_input(
         "Google Sheet CSV URL:",
-        value="https://docs.google.com/spreadsheets/d/1eFZcnDoGT2NJHaEQSgxW5psN5kvlkYx1vtuXGRFTGTk/export?format=csv",
+        value="https://docs.google.com/spreadsheets/d/1hBPTl0qzmpLGb9nJHJaK0ZogBs-dbhqoDOp1VVj8RgY/export?format=csv",
         help="Enter the CSV export URL of your Google Sheet. Required columns: Number, Code. Optional: Title, Category, Description, PDF_Enabled"
     )
     
@@ -1628,155 +1628,51 @@ if show_code:
                 st.code("Code copied! (Use Ctrl+C to copy from the code block below)")
             st.code(display_code, language='html', line_numbers=True)
 
-# --- DOWNLOAD BUTTONS ---
-if example_info and (example_info.get('pdf_enabled') or (isinstance(example_info.get('pdf_enabled'), str) and example_info.get('pdf_enabled').lower() == 'true')):
-    st.markdown("---")
-    col1, col2, col3 = st.columns([1, 1, 2])
+def generate_python_script(html_content, title="Document"):
+    """Generate Python script that can recreate the HTML content"""
+    clean_title = title.replace(' ', '_').replace('-', '_').lower()
     
-    with col1:
-        pdf_data = generate_pdf_from_html(current_code, example_info['title'])
-        if pdf_data:
-            st.download_button(
-                label="📄 Download PDF",
-                data=pdf_data,
-                file_name=f"{example_info['title'].replace(' ', '_')}.pdf",
-                mime="application/pdf",
-                help="Download as formatted PDF (CSS styling applied, no raw code shown)"
-            )
+    python_script = f'''#!/usr/bin/env python3
+"""
+Generated Python script for: {title}
+This script recreates the HTML/CSS content and can save it to a file.
+"""
+
+def get_html_content():
+    """Returns the HTML content as a string"""
+    html_content = """{html_content}"""
+    return html_content
+
+def save_to_file(filename="{clean_title}.html"):
+    """Save the HTML content to a file"""
+    with open(filename, 'w', encoding='utf-8') as f:
+        f.write(get_html_content())
+    print(f"HTML content saved to {{filename}}")
+
+def preview_content():
+    """Print a preview of the HTML content"""
+    content = get_html_content()
+    print("HTML Content Preview:")
+    print("-" * 50)
+    print(content[:500] + "..." if len(content) > 500 else content)
+    print("-" * 50)
+
+if __name__ == "__main__":
+    import sys
+    
+    if len(sys.argv) > 1:
+        if sys.argv[1] == "save":
+            filename = sys.argv[2] if len(sys.argv) > 2 else "{clean_title}.html"
+            save_to_file(filename)
+        elif sys.argv[1] == "preview":
+            preview_content()
         else:
-            if st.button("📄 Download PDF"):
-                st.error("PDF generation requires reportlab package. Install with: pip install reportlab")
-    
-    with col2:
-        clean_html = clean_html_for_download(current_code, remove_download_buttons=True)
-        st.download_button(
-            label="💾 Download HTML",
-            data=clean_html,
-            file_name=f"{example_info['title'].replace(' ', '_')}.html",
-            mime="text/html",
-            help="Download clean HTML with embedded CSS (no raw CSS code visible)"
-        )
-    
-    with col3:
-        if halt_edit:
-            st.info("🔒 Edit mode is locked to prevent accidental changes")
-
-# --- STATUS BAR ---
-st.markdown("---")
-status_col1, status_col2, status_col3, status_col4 = st.columns(4)
-
-with status_col1:
-    st.metric("Selected Item", selected_number)
-
-with status_col2:
-    if data_source == "📋 Demo Examples" and example_info:
-        st.metric("Category", example_info['category'])
+            print("Usage: python script.py [save|preview] [filename]")
     else:
-        mode_status = "✏️ Edit Mode" if edit_mode else "👁️ View Mode"
-        st.metric("Current Mode", mode_status)
-
-with status_col3:
-    if data_source == "📋 Demo Examples":
-        st.metric("Total Examples", len(DEMO_EXAMPLES))
-    else:
-        try:
-            total_entries = len(df) if 'df' in locals() and not df.empty else 0
-            st.metric("Total Entries", total_entries)
-        except:
-            st.metric("Total Entries", "N/A")
-
-with status_col4:
-    preview_status = "🌐 Live" if live_preview else "📱 Hidden"
-    st.metric("Preview Status", preview_status)
-
-# --- DEMO EXAMPLES INFO ---
-if data_source == "📋 Demo Examples":
-    with st.expander("📋 Demo Examples Overview", expanded=False):
-        st.markdown("""
-        **8 Professional Demo Examples Available:**
-        
-        1. **Newsletter Template** - Real Estate Weekly (PDF Downloadable)
-        2. **Landing Page** - CreditPro Financial Solutions  
-        3. **Corporate Website** - Premier Realty Agency
-        4. **Streamlit Dashboard** - Business Analytics Interface
-        5. **Business Letter** - Credit Application Response (PDF Downloadable)
-        6. **Email Sequence** - Real Estate Lead Nurturing (7 emails)
-        7. **Professional Invoice** - Business Services (PDF Downloadable)
-        8. **Business Contract** - Real Estate Purchase Agreement (PDF Downloadable)
-        
-        **Features:**
-        - Professional designs with real business content
-        - Credit, real estate, and business themes
-        - PDF downloadable documents where applicable
-        - Responsive layouts and modern styling
-        - Ready-to-use templates for various business needs
-        """)
-
-# --- INSTRUCTIONS ---
-with st.expander("📖 Instructions & Tips", expanded=False):
-    st.markdown(
-        """
-        **How to use this enhanced code viewer:**
-        
-        **Data Sources:**
-        - **Demo Examples**: 8 professional templates ready to use
-        - **Google Sheets**: Load custom code from your spreadsheet
-        
-        **Display Controls:**
-        - **Live Preview**: View rendered HTML/CSS (ON by default)
-        - **Show Code Panel**: Display code editor/viewer (OFF by default for cleaner view)
-        - **Edit Mode**: Enable real-time code editing
-        
-        **Enhanced Features:**
-        - **Category Filtering**: Filter demo examples by type
-        - **Better Defaults**: Live preview on, code off for immediate visual impact
-        - **Larger Preview**: Increased height for better viewing experience
-        - **Professional Templates**: Real business content, not placeholder text
-        - **PDF Downloads**: Simulated download functionality for documents
-        
-        **Tips:**
-        - Start with live preview to see the design immediately
-        - Enable code panel only when you need to edit or study the code
-        - Use demo examples for inspiration and starting points
-        - Edit mode provides real-time preview updates
-        """
-    )
-
-    st.markdown(
-        """
-        **Google Sheets Structure:**
-        Your Google Sheet should have these columns:
-        - **Number** (required): Unique identifier
-        - **Code** (required): HTML/CSS content
-        - **Title** (optional): Display name
-        - **Category** (optional): Group classification
-        - **Description** (optional): Brief description
-        - **PDF_Enabled** (optional): true/false for PDF download capability
-        
-        **Real Downloads:**
-        - **PDF Downloads**: Generate actual PDF files from HTML content
-        - **HTML Downloads**: Save HTML/CSS code directly
-        - **Streamlit Integration**: Uses native download functionality
-        """
-    )
-
-# --- FOOTER ---
-st.markdown("---")
-st.markdown(
-    "<div style='text-align: center; color: #666; font-size: 0.8em;'>"
-    "🚀 Enhanced Code Viewer | 8 Professional Demo Examples | Real-time Editing | PDF Downloads"
-    "</div>", 
-    unsafe_allow_html=True
-)
-
-
-st.markdown("""
-<script>
-function downloadPDF() {
-    alert('PDF download feature would be implemented with server-side PDF generation');
-}
-</script>
-""", unsafe_allow_html=True)
+        # Default action: save to file
+        save_to_file()
+'''
+    return python_script
 
 def clean_html_for_download(html_content, remove_download_buttons=True):
     """Clean and structure HTML for download with embedded CSS"""
@@ -1966,37 +1862,59 @@ def generate_pdf_from_html(html_content, title="Document"):
         return None
 
 # --- DOWNLOAD BUTTONS ---
-if example_info and (example_info.get('pdf_enabled') or (isinstance(example_info.get('pdf_enabled'), str) and example_info.get('pdf_enabled').lower() == 'true')):
+if example_info:
     st.markdown("---")
-    col1, col2, col3 = st.columns([1, 1, 2])
+    
+    # Show download buttons for all examples (not just PDF-enabled ones)
+    if example_info.get('pdf_enabled') or (isinstance(example_info.get('pdf_enabled'), str) and example_info.get('pdf_enabled').lower() == 'true'):
+        col1, col2, col3, col4 = st.columns([1, 1, 1, 1])
+    else:
+        col1, col2, col3, col4 = st.columns([1, 1, 1, 1])
     
     with col1:
-        pdf_data = generate_pdf_from_html(current_code, example_info['title'])
-        if pdf_data:
-            st.download_button(
-                label="📄 Download PDF",
-                data=pdf_data,
-                file_name=f"{example_info['title'].replace(' ', '_')}.pdf",
-                mime="application/pdf",
-                help="Download as formatted PDF (CSS styling applied, no raw code shown)"
-            )
+        # PDF download (only for PDF-enabled examples)
+        if example_info.get('pdf_enabled') or (isinstance(example_info.get('pdf_enabled'), str) and example_info.get('pdf_enabled').lower() == 'true'):
+            pdf_data = generate_pdf_from_html(current_code, example_info['title'])
+            if pdf_data:
+                st.download_button(
+                    label="📄 PDF",
+                    data=pdf_data,
+                    file_name=f"{example_info['title'].replace(' ', '_')}.pdf",
+                    mime="application/pdf",
+                    help="Download as formatted PDF (CSS styling applied)"
+                )
+            else:
+                if st.button("📄 PDF"):
+                    st.error("PDF generation requires reportlab package")
         else:
-            if st.button("📄 Download PDF"):
-                st.error("PDF generation requires reportlab package. Install with: pip install reportlab")
+            st.write("")  # Empty space for alignment
     
     with col2:
+        # HTML download (available for all examples)
         clean_html = clean_html_for_download(current_code, remove_download_buttons=True)
         st.download_button(
-            label="💾 Download HTML",
+            label="💾 HTML",
             data=clean_html,
             file_name=f"{example_info['title'].replace(' ', '_')}.html",
             mime="text/html",
-            help="Download clean HTML with embedded CSS (no raw CSS code visible)"
+            help="Download clean HTML with embedded CSS"
         )
     
     with col3:
+        python_script = generate_python_script(current_code, example_info['title'])
+        st.download_button(
+            label="🐍 Python",
+            data=python_script,
+            file_name=f"{example_info['title'].replace(' ', '_')}.py",
+            mime="text/x-python",
+            help="Download Python script that can recreate this HTML content"
+        )
+    
+    with col4:
         if halt_edit:
-            st.info("🔒 Edit mode is locked to prevent accidental changes")
+            st.info("🔒 Locked")
+        else:
+            st.write("")  # Empty space for alignment
 
 # --- STATUS BAR ---
 st.markdown("---")
@@ -2114,4 +2032,3 @@ function downloadPDF() {
 }
 </script>
 """, unsafe_allow_html=True)
-
