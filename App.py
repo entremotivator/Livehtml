@@ -1264,135 +1264,263 @@ def load_data(url):
         return pd.DataFrame(columns=['Number', 'Code', 'Title', 'Category', 'Description', 'PDF_Enabled'])
 
 def generate_pdf_from_html(html_content, title="Document"):
-    """Generate PDF from HTML content using reportlab with better HTML parsing"""
+    """Generate PDF from HTML with enhanced business letter formatting"""
     try:
-        from reportlab.lib.pagesizes import letter, A4
+        from reportlab.lib.pagesizes import A4
         from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
         from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
         from reportlab.lib.units import inch
-        from reportlab.lib.colors import HexColor
+        from reportlab.lib.colors import HexColor, black
         from io import BytesIO
         import re
         from html.parser import HTMLParser
         
-        class HTMLToPDFParser(HTMLParser):
+        class BusinessLetterHTMLParser(HTMLParser):
             def __init__(self):
                 super().__init__()
                 self.content = []
                 self.current_text = ""
                 self.in_style = False
                 self.in_script = False
-                self.in_title = False
-                self.in_header = False
-                self.header_level = 0
+                self.current_class = ""
+                self.in_letterhead = False
+                self.in_date = False
+                self.in_recipient = False
+                self.in_subject = False
+                self.in_body = False
+                self.in_closing = False
+                self.in_enclosures = False
                 
             def handle_starttag(self, tag, attrs):
+                # Get class attribute
+                self.current_class = ""
+                for attr_name, attr_value in attrs:
+                    if attr_name == "class":
+                        self.current_class = attr_value
+                        break
+                
                 if tag == 'style' or tag == 'script':
                     self.in_style = True
                     self.in_script = True
+                elif 'letterhead' in self.current_class:
+                    self._flush_current_text()
+                    self.in_letterhead = True
+                elif 'date' in self.current_class:
+                    self._flush_current_text()
+                    self.in_date = True
+                elif 'recipient' in self.current_class:
+                    self._flush_current_text()
+                    self.in_recipient = True
+                elif 'subject-line' in self.current_class:
+                    self._flush_current_text()
+                    self.in_subject = True
+                elif 'letter-body' in self.current_class:
+                    self._flush_current_text()
+                    self.in_body = True
+                elif 'closing' in self.current_class:
+                    self._flush_current_text()
+                    self.in_closing = True
+                elif 'enclosures' in self.current_class:
+                    self._flush_current_text()
+                    self.in_enclosures = True
+                elif tag == 'p' and self.in_body:
+                    self._flush_current_text()
+                elif tag == 'br':
+                    self.content.append(('break', ''))
                 elif tag in ['h1', 'h2', 'h3', 'h4', 'h5', 'h6']:
-                    self.in_header = True
-                    self.header_level = int(tag[1])
-                elif tag == 'title':
-                    self.in_title = True
-                elif tag in ['p', 'div', 'br']:
-                    if self.current_text.strip():
-                        self.content.append(('text', self.current_text.strip()))
-                        self.current_text = ""
-                    if tag == 'br':
-                        self.content.append(('break', ''))
-                        
+                    self._flush_current_text()
+                    self.content.append(('header', '', int(tag[1])))
+                    
             def handle_endtag(self, tag):
                 if tag == 'style' or tag == 'script':
                     self.in_style = False
                     self.in_script = False
-                elif tag in ['h1', 'h2', 'h3', 'h4', 'h5', 'h6']:
-                    if self.current_text.strip():
-                        self.content.append(('header', self.current_text.strip(), self.header_level))
-                        self.current_text = ""
-                    self.in_header = False
-                    self.header_level = 0
-                elif tag == 'title':
-                    self.in_title = False
-                elif tag in ['p', 'div']:
-                    if self.current_text.strip():
-                        self.content.append(('text', self.current_text.strip()))
-                        self.current_text = ""
-                        
+                elif tag == 'div':
+                    if self.in_letterhead:
+                        self._flush_current_text('letterhead')
+                        self.in_letterhead = False
+                    elif self.in_date:
+                        self._flush_current_text('date')
+                        self.in_date = False
+                    elif self.in_recipient:
+                        self._flush_current_text('recipient')
+                        self.in_recipient = False
+                    elif self.in_subject:
+                        self._flush_current_text('subject')
+                        self.in_subject = False
+                    elif self.in_body:
+                        self._flush_current_text('body')
+                        self.in_body = False
+                    elif self.in_closing:
+                        self._flush_current_text('closing')
+                        self.in_closing = False
+                    elif self.in_enclosures:
+                        self._flush_current_text('enclosures')
+                        self.in_enclosures = False
+                elif tag == 'p' and self.in_body:
+                    self._flush_current_text('paragraph')
+                    
             def handle_data(self, data):
-                if not self.in_style and not self.in_script and not self.in_title:
-                    self.current_text += data
+                if not self.in_style and not self.in_script:
+                    self.current_text += data.strip() + " "
+                    
+            def _flush_current_text(self, text_type='text'):
+                if self.current_text.strip():
+                    self.content.append((text_type, self.current_text.strip()))
+                    self.current_text = ""
                     
             def get_content(self):
-                if self.current_text.strip():
-                    self.content.append(('text', self.current_text.strip()))
+                self._flush_current_text()
                 return self.content
         
-        # Create a BytesIO buffer
+        # Create PDF buffer
         buffer = BytesIO()
-        
-        # Create PDF document
-        doc = SimpleDocTemplate(buffer, pagesize=A4, topMargin=1*inch)
+        doc = SimpleDocTemplate(buffer, pagesize=A4, topMargin=0.75*inch, bottomMargin=0.75*inch, leftMargin=1*inch, rightMargin=1*inch)
         styles = getSampleStyleSheet()
         story = []
         
-        # Custom styles
-        title_style = ParagraphStyle(
-            'CustomTitle',
-            parent=styles['Heading1'],
-            fontSize=18,
-            spaceAfter=30,
+        # Business letter styles
+        letterhead_style = ParagraphStyle(
+            'Letterhead',
+            parent=styles['Normal'],
+            fontSize=14,
+            spaceAfter=20,
             textColor=HexColor('#2c3e50'),
-            alignment=1  # Center alignment
+            alignment=1,  # Center
+            fontName='Helvetica-Bold'
         )
         
-        header_styles = {
-            1: ParagraphStyle('Header1', parent=styles['Heading1'], fontSize=16, spaceAfter=20, textColor=HexColor('#34495e')),
-            2: ParagraphStyle('Header2', parent=styles['Heading2'], fontSize=14, spaceAfter=15, textColor=HexColor('#34495e')),
-            3: ParagraphStyle('Header3', parent=styles['Heading3'], fontSize=12, spaceAfter=12, textColor=HexColor('#34495e')),
-        }
+        company_info_style = ParagraphStyle(
+            'CompanyInfo',
+            parent=styles['Normal'],
+            fontSize=10,
+            spaceAfter=30,
+            textColor=HexColor('#666666'),
+            alignment=1,  # Center
+            fontName='Helvetica'
+        )
+        
+        date_style = ParagraphStyle(
+            'Date',
+            parent=styles['Normal'],
+            fontSize=11,
+            spaceAfter=30,
+            textColor=black,
+            alignment=2,  # Right
+            fontName='Helvetica'
+        )
+        
+        recipient_style = ParagraphStyle(
+            'Recipient',
+            parent=styles['Normal'],
+            fontSize=11,
+            spaceAfter=20,
+            textColor=black,
+            alignment=0,  # Left
+            fontName='Helvetica'
+        )
+        
+        subject_style = ParagraphStyle(
+            'Subject',
+            parent=styles['Normal'],
+            fontSize=11,
+            spaceAfter=20,
+            textColor=black,
+            alignment=0,  # Left
+            fontName='Helvetica-Bold'
+        )
         
         body_style = ParagraphStyle(
-            'CustomBody',
+            'Body',
+            parent=styles['Normal'],
+            fontSize=11,
+            spaceAfter=12,
+            textColor=black,
+            alignment=4,  # Justify
+            fontName='Helvetica',
+            leading=16
+        )
+        
+        closing_style = ParagraphStyle(
+            'Closing',
+            parent=styles['Normal'],
+            fontSize=11,
+            spaceAfter=60,
+            textColor=black,
+            alignment=0,  # Left
+            fontName='Helvetica'
+        )
+        
+        enclosures_style = ParagraphStyle(
+            'Enclosures',
             parent=styles['Normal'],
             fontSize=10,
             spaceAfter=12,
-            textColor=HexColor('#2c3e50'),
-            leading=14
+            textColor=black,
+            alignment=0,  # Left
+            fontName='Helvetica'
         )
         
-        # Add title
-        story.append(Paragraph(title, title_style))
-        story.append(Spacer(1, 20))
-        
         # Parse HTML content
-        parser = HTMLToPDFParser()
+        parser = BusinessLetterHTMLParser()
         parser.feed(html_content)
         content_items = parser.get_content()
         
-        # Convert parsed content to PDF elements
+        # Process content items
         for item in content_items:
-            if item[0] == 'header':
-                level = min(item[2], 3)  # Cap at h3
-                style = header_styles.get(level, header_styles[3])
-                story.append(Paragraph(item[1], style))
-            elif item[0] == 'text':
-                # Clean up text and add as paragraph
-                clean_text = item[1].replace('&nbsp;', ' ').replace('&amp;', '&')
-                if clean_text.strip():
-                    story.append(Paragraph(clean_text, body_style))
-            elif item[0] == 'break':
+            content_type, text = item[0], item[1]
+            
+            if content_type == 'letterhead':
+                # Split letterhead into company name and info
+                lines = text.split('\n')
+                if lines:
+                    story.append(Paragraph(lines[0], letterhead_style))
+                    if len(lines) > 1:
+                        story.append(Paragraph(' '.join(lines[1:]), company_info_style))
+                        
+            elif content_type == 'date':
+                story.append(Paragraph(text, date_style))
+                
+            elif content_type == 'recipient':
+                # Split recipient into lines
+                lines = [line.strip() for line in text.split('\n') if line.strip()]
+                for line in lines:
+                    story.append(Paragraph(line, recipient_style))
+                story.append(Spacer(1, 10))
+                
+            elif content_type == 'subject':
+                story.append(Paragraph(text, subject_style))
+                
+            elif content_type == 'paragraph' or content_type == 'body':
+                if text.strip() and len(text.strip()) > 5:
+                    story.append(Paragraph(text, body_style))
+                    
+            elif content_type == 'closing':
+                lines = [line.strip() for line in text.split('\n') if line.strip()]
+                for line in lines:
+                    story.append(Paragraph(line, closing_style))
+                    
+            elif content_type == 'enclosures':
+                story.append(Paragraph(text, enclosures_style))
+                
+            elif content_type == 'break':
                 story.append(Spacer(1, 6))
         
-        # If no content was parsed, fall back to simple text extraction
+        # Fallback for simple content
         if not content_items:
-            clean_text = re.sub('<[^<]+?>', '', html_content)
-            clean_text = clean_text.replace('&nbsp;', ' ').replace('&amp;', '&')
-            paragraphs = [p.strip() for p in clean_text.split('\n') if p.strip()]
+            # Remove HTML tags and CSS
+            clean_text = re.sub(r'<style[^>]*>.*?</style>', '', html_content, flags=re.DOTALL)
+            clean_text = re.sub(r'<script[^>]*>.*?</script>', '', clean_text, flags=re.DOTALL)
+            clean_text = re.sub(r'<[^>]+>', '', clean_text)
+            clean_text = re.sub(r'\s+', ' ', clean_text).strip()
+            
+            # Split into paragraphs
+            paragraphs = [p.strip() for p in clean_text.split('.') if p.strip() and len(p.strip()) > 10]
             
             for para in paragraphs:
-                story.append(Paragraph(para, body_style))
-                story.append(Spacer(1, 8))
+                if para:
+                    story.append(Paragraph(para + '.', body_style))
+                    story.append(Spacer(1, 8))
         
         # Build PDF
         doc.build(story)
@@ -1402,8 +1530,12 @@ def generate_pdf_from_html(html_content, title="Document"):
     except ImportError:
         return None
     except Exception as e:
-        print(f"PDF generation error: {e}")
+        st.error(f"PDF generation error: {str(e)}")
         return None
+
+
+# The second generate_pdf_from_html function has been removed
+
 
 def clean_html_for_download(html_content):
     """Clean and structure HTML for download"""
@@ -1475,7 +1607,7 @@ if data_source == "📋 Demo Examples":
 else:
     sheet_url = st.sidebar.text_input(
         "Google Sheet CSV URL:",
-        value="https://docs.google.com/spreadsheets/d/1eFZcnDoGT2NJHaEQSgxW5psN5kvlkYx1vtuXGRFTGTk/export?format=csv",
+        value="https://docs.google.com/spreadsheets/d/1hBPTl0qzmpLGb9nJHJaK0ZogBs-dbhqoDOp1VVj8RgY/export?format=csv",
         help="Enter the CSV export URL of your Google Sheet. Required columns: Number, Code. Optional: Title, Category, Description, PDF_Enabled"
     )
     
@@ -1725,166 +1857,6 @@ def clean_html_for_download(html_content, remove_download_buttons=True):
     
     return html_content
 
-def generate_pdf_from_html(html_content, title="Document"):
-    """Generate PDF from HTML with enhanced CSS rendering"""
-    try:
-        from reportlab.lib.pagesizes import A4
-        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
-        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-        from reportlab.lib.units import inch
-        from reportlab.lib.colors import HexColor, black, blue
-        from io import BytesIO
-        import re
-        from html.parser import HTMLParser
-        
-        class AdvancedHTMLToPDFParser(HTMLParser):
-            def __init__(self):
-                super().__init__()
-                self.content = []
-                self.current_text = ""
-                self.in_style = False
-                self.in_script = False
-                self.in_title = False
-                self.in_header = False
-                self.header_level = 0
-                self.in_paragraph = False
-                self.text_style = 'normal'
-                
-            def handle_starttag(self, tag, attrs):
-                if tag == 'style':
-                    self.in_style = True
-                elif tag == 'script':
-                    self.in_script = True
-                elif tag in ['h1', 'h2', 'h3', 'h4', 'h5', 'h6']:
-                    self._flush_current_text()
-                    self.in_header = True
-                    self.header_level = int(tag[1])
-                elif tag == 'title':
-                    self.in_title = True
-                elif tag == 'p':
-                    self._flush_current_text()
-                    self.in_paragraph = True
-                elif tag in ['strong', 'b']:
-                    self.text_style = 'bold'
-                elif tag in ['em', 'i']:
-                    self.text_style = 'italic'
-                elif tag == 'br':
-                    self.content.append(('break', ''))
-                elif tag == 'hr':
-                    self.content.append(('line', ''))
-                    
-            def handle_endtag(self, tag):
-                if tag == 'style':
-                    self.in_style = False
-                elif tag == 'script':
-                    self.in_script = False
-                elif tag in ['h1', 'h2', 'h3', 'h4', 'h5', 'h6']:
-                    if self.current_text.strip():
-                        self.content.append(('header', self.current_text.strip(), self.header_level))
-                        self.current_text = ""
-                    self.in_header = False
-                    self.header_level = 0
-                elif tag == 'title':
-                    self.in_title = False
-                elif tag == 'p':
-                    self._flush_current_text()
-                    self.in_paragraph = False
-                elif tag in ['strong', 'b', 'em', 'i']:
-                    self.text_style = 'normal'
-                    
-            def handle_data(self, data):
-                if not self.in_style and not self.in_script and not self.in_title:
-                    self.current_text += data
-                    
-            def _flush_current_text(self):
-                if self.current_text.strip():
-                    self.content.append(('text', self.current_text.strip(), self.text_style))
-                    self.current_text = ""
-                    
-            def get_content(self):
-                self._flush_current_text()
-                return self.content
-        
-        # Create PDF buffer
-        buffer = BytesIO()
-        doc = SimpleDocTemplate(buffer, pagesize=A4, topMargin=1*inch, bottomMargin=1*inch)
-        styles = getSampleStyleSheet()
-        story = []
-        
-        # Enhanced styles
-        title_style = ParagraphStyle(
-            'CustomTitle',
-            parent=styles['Heading1'],
-            fontSize=22,
-            spaceAfter=30,
-            textColor=HexColor('#1a365d'),
-            alignment=1,
-            fontName='Helvetica-Bold'
-        )
-        
-        header_styles = {
-            1: ParagraphStyle('Header1', parent=styles['Heading1'], fontSize=18, spaceAfter=20, textColor=HexColor('#2d3748'), fontName='Helvetica-Bold'),
-            2: ParagraphStyle('Header2', parent=styles['Heading2'], fontSize=16, spaceAfter=15, textColor=HexColor('#4a5568'), fontName='Helvetica-Bold'),
-            3: ParagraphStyle('Header3', parent=styles['Heading3'], fontSize=14, spaceAfter=12, textColor=HexColor('#4a5568'), fontName='Helvetica-Bold'),
-        }
-        
-        body_style = ParagraphStyle(
-            'CustomBody',
-            parent=styles['Normal'],
-            fontSize=11,
-            spaceAfter=12,
-            textColor=HexColor('#2d3748'),
-            leading=16,
-            fontName='Helvetica'
-        )
-        
-        bold_style = ParagraphStyle(
-            'BoldText',
-            parent=body_style,
-            fontName='Helvetica-Bold'
-        )
-        
-        # Add title
-        story.append(Paragraph(title, title_style))
-        story.append(Spacer(1, 20))
-        
-        # Parse HTML content
-        parser = AdvancedHTMLToPDFParser()
-        parser.feed(html_content)
-        content_items = parser.get_content()
-        
-        # Convert parsed content to PDF elements
-        for item in content_items:
-            if item[0] == 'header':
-                level = min(item[2], 3)
-                style = header_styles.get(level, header_styles[3])
-                story.append(Paragraph(item[1], style))
-                story.append(Spacer(1, 10))
-            elif item[0] == 'text':
-                clean_text = item[1].replace('&nbsp;', ' ').replace('&amp;', '&').replace('&lt;', '<').replace('&gt;', '>')
-                if clean_text.strip() and len(clean_text.strip()) > 2:
-                    text_style = bold_style if len(item) > 2 and item[2] == 'bold' else body_style
-                    story.append(Paragraph(clean_text, text_style))
-            elif item[0] == 'break':
-                story.append(Spacer(1, 8))
-            elif item[0] == 'line':
-                story.append(Spacer(1, 12))
-        
-        # Fallback if no content parsed
-        if not content_items:
-            story.append(Paragraph("This document contains primarily visual content. Please view the HTML version for the complete experience.", body_style))
-        
-        # Build PDF
-        doc.build(story)
-        buffer.seek(0)
-        return buffer.getvalue()
-        
-    except ImportError:
-        return None
-    except Exception as e:
-        st.error(f"PDF generation error: {str(e)}")
-        return None
-
 # --- DOWNLOAD BUTTONS ---
 if example_info:
     st.markdown("---")
@@ -2048,3 +2020,4 @@ function downloadPDF() {
 }
 </script>
 """, unsafe_allow_html=True)
+
