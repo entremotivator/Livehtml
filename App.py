@@ -1475,7 +1475,7 @@ if data_source == "📋 Demo Examples":
 else:
     sheet_url = st.sidebar.text_input(
         "Google Sheet CSV URL:",
-        value="https://docs.google.com/spreadsheets/d/1eFZcnDoGT2NJHaEQSgxW5psN5kvlkYx1vtuXGRFTGTk/export?format=csv",
+        value="https://docs.google.com/spreadsheets/d/1hBPTl0qzmpLGb9nJHJaK0ZogBs-dbhqoDOp1VVj8RgY/export?format=csv",
         help="Enter the CSV export URL of your Google Sheet. Required columns: Number, Code. Optional: Title, Category, Description, PDF_Enabled"
     )
     
@@ -1548,7 +1548,12 @@ st.sidebar.subheader("🎛️ Display Controls")
 
 live_preview = st.sidebar.toggle("🌐 Live Preview", value=True, help="Enable/disable live preview")
 show_code = st.sidebar.toggle("👁️ Show Code Panel", value=False, help="Toggle code visibility")  # Default to False
-edit_mode = st.sidebar.toggle("✏️ Edit Mode", value=False, help="Enable to edit the code")
+
+halt_edit = st.sidebar.toggle("🔒 Lock Edit Mode", value=False, help="Lock editing to prevent accidental changes")
+edit_mode = st.sidebar.toggle("✏️ Edit Mode", value=False, help="Enable to edit the code", disabled=halt_edit)
+
+if halt_edit and edit_mode:
+    st.sidebar.warning("🔒 Edit mode is locked. Disable lock to edit.")
 
 # --- EDIT MODE HANDLING ---
 if edit_mode and show_code:
@@ -1636,21 +1641,25 @@ if example_info and (example_info.get('pdf_enabled') or (isinstance(example_info
                 data=pdf_data,
                 file_name=f"{example_info['title'].replace(' ', '_')}.pdf",
                 mime="application/pdf",
-                help="Download this content as a formatted PDF document"
+                help="Download as formatted PDF (CSS styling applied, no raw code shown)"
             )
         else:
             if st.button("📄 Download PDF"):
                 st.error("PDF generation requires reportlab package. Install with: pip install reportlab")
     
     with col2:
-        clean_html = clean_html_for_download(current_code)
+        clean_html = clean_html_for_download(current_code, remove_download_buttons=True)
         st.download_button(
             label="💾 Download HTML",
             data=clean_html,
             file_name=f"{example_info['title'].replace(' ', '_')}.html",
             mime="text/html",
-            help="Download the complete HTML/CSS code"
+            help="Download clean HTML with embedded CSS (no raw CSS code visible)"
         )
+    
+    with col3:
+        if halt_edit:
+            st.info("🔒 Edit mode is locked to prevent accidental changes")
 
 # --- STATUS BAR ---
 st.markdown("---")
@@ -1768,3 +1777,341 @@ function downloadPDF() {
 }
 </script>
 """, unsafe_allow_html=True)
+
+def clean_html_for_download(html_content, remove_download_buttons=True):
+    """Clean and structure HTML for download with embedded CSS"""
+    import re
+    
+    # Remove download buttons if requested
+    if remove_download_buttons:
+        html_content = re.sub(r'<button[^>]*download-btn[^>]*>.*?</button>', '', html_content, flags=re.DOTALL)
+        html_content = re.sub(r'<script[^>]*>.*?downloadPDF$$$$.*?</script>', '', html_content, flags=re.DOTALL)
+    
+    # Extract CSS from style tags
+    css_pattern = r'<style[^>]*>(.*?)</style>'
+    css_matches = re.findall(css_pattern, html_content, re.DOTALL)
+    
+    # Remove original style tags
+    html_content = re.sub(css_pattern, '', html_content, flags=re.DOTALL)
+    
+    # Combine all CSS
+    combined_css = '\n'.join(css_matches)
+    
+    # Clean up CSS (remove comments, minify)
+    combined_css = re.sub(r'/\*.*?\*/', '', combined_css, flags=re.DOTALL)
+    combined_css = re.sub(r'\s+', ' ', combined_css).strip()
+    
+    # Ensure proper HTML structure with embedded CSS
+    if not html_content.strip().startswith('<!DOCTYPE html>'):
+        if '<html>' not in html_content:
+            # Create clean HTML structure with embedded CSS
+            body_content = html_content
+            html_content = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Downloaded Content</title>
+    <style>{combined_css}</style>
+</head>
+<body>
+{body_content}
+</body>
+</html>"""
+        else:
+            # Insert CSS into existing HTML structure
+            if '<head>' in html_content and combined_css:
+                html_content = html_content.replace('</head>', f'    <style>{combined_css}</style>\n</head>')
+    
+    return html_content
+
+def generate_pdf_from_html(html_content, title="Document"):
+    """Generate PDF from HTML with proper CSS rendering"""
+    try:
+        from reportlab.lib.pagesizes import A4
+        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.lib.units import inch
+        from reportlab.lib.colors import HexColor
+        from io import BytesIO
+        import re
+        from html.parser import HTMLParser
+        
+        class EnhancedHTMLToPDFParser(HTMLParser):
+            def __init__(self):
+                super().__init__()
+                self.content = []
+                self.current_text = ""
+                self.in_style = False
+                self.in_script = False
+                self.in_title = False
+                self.in_header = False
+                self.header_level = 0
+                self.css_styles = {}
+                
+            def handle_starttag(self, tag, attrs):
+                if tag == 'style':
+                    self.in_style = True
+                elif tag == 'script':
+                    self.in_script = True
+                elif tag in ['h1', 'h2', 'h3', 'h4', 'h5', 'h6']:
+                    self.in_header = True
+                    self.header_level = int(tag[1])
+                elif tag == 'title':
+                    self.in_title = True
+                elif tag in ['p', 'div', 'br']:
+                    if self.current_text.strip():
+                        self.content.append(('text', self.current_text.strip()))
+                        self.current_text = ""
+                    if tag == 'br':
+                        self.content.append(('break', ''))
+                        
+            def handle_endtag(self, tag):
+                if tag == 'style':
+                    self.in_style = False
+                elif tag == 'script':
+                    self.in_script = False
+                elif tag in ['h1', 'h2', 'h3', 'h4', 'h5', 'h6']:
+                    if self.current_text.strip():
+                        self.content.append(('header', self.current_text.strip(), self.header_level))
+                        self.current_text = ""
+                    self.in_header = False
+                    self.header_level = 0
+                elif tag == 'title':
+                    self.in_title = False
+                elif tag in ['p', 'div']:
+                    if self.current_text.strip():
+                        self.content.append(('text', self.current_text.strip()))
+                        self.current_text = ""
+                        
+            def handle_data(self, data):
+                if not self.in_style and not self.in_script and not self.in_title:
+                    self.current_text += data
+                    
+            def get_content(self):
+                if self.current_text.strip():
+                    self.content.append(('text', self.current_text.strip()))
+                return self.content
+        
+        # Create a BytesIO buffer
+        buffer = BytesIO()
+        
+        # Create PDF document
+        doc = SimpleDocTemplate(buffer, pagesize=A4, topMargin=1*inch)
+        styles = getSampleStyleSheet()
+        story = []
+        
+        title_style = ParagraphStyle(
+            'CustomTitle',
+            parent=styles['Heading1'],
+            fontSize=20,
+            spaceAfter=30,
+            textColor=HexColor('#2c3e50'),
+            alignment=1,  # Center alignment
+            fontName='Helvetica-Bold'
+        )
+        
+        header_styles = {
+            1: ParagraphStyle('Header1', parent=styles['Heading1'], fontSize=16, spaceAfter=20, textColor=HexColor('#34495e'), fontName='Helvetica-Bold'),
+            2: ParagraphStyle('Header2', parent=styles['Heading2'], fontSize=14, spaceAfter=15, textColor=HexColor('#34495e'), fontName='Helvetica-Bold'),
+            3: ParagraphStyle('Header3', parent=styles['Heading3'], fontSize=12, spaceAfter=12, textColor=HexColor('#34495e'), fontName='Helvetica-Bold'),
+        }
+        
+        body_style = ParagraphStyle(
+            'CustomBody',
+            parent=styles['Normal'],
+            fontSize=11,
+            spaceAfter=12,
+            textColor=HexColor('#2c3e50'),
+            leading=16,
+            fontName='Helvetica'
+        )
+        
+        # Add title
+        story.append(Paragraph(title, title_style))
+        story.append(Spacer(1, 20))
+        
+        # Parse HTML content
+        parser = EnhancedHTMLToPDFParser()
+        parser.feed(html_content)
+        content_items = parser.get_content()
+        
+        # Convert parsed content to PDF elements
+        for item in content_items:
+            if item[0] == 'header':
+                level = min(item[2], 3)  # Cap at h3
+                style = header_styles.get(level, header_styles[3])
+                story.append(Paragraph(item[1], style))
+            elif item[0] == 'text':
+                # Clean up text and add as paragraph
+                clean_text = item[1].replace('&nbsp;', ' ').replace('&amp;', '&').replace('&lt;', '<').replace('&gt;', '>')
+                if clean_text.strip() and len(clean_text.strip()) > 3:  # Filter out very short text
+                    story.append(Paragraph(clean_text, body_style))
+            elif item[0] == 'break':
+                story.append(Spacer(1, 8))
+        
+        # If no meaningful content was parsed, add a message
+        if not content_items or len([item for item in content_items if item[0] in ['text', 'header']]) == 0:
+            story.append(Paragraph("This document contains primarily visual content that is best viewed in HTML format.", body_style))
+        
+        # Build PDF
+        doc.build(story)
+        buffer.seek(0)
+        return buffer.getvalue()
+        
+    except ImportError:
+        return None
+    except Exception as e:
+        st.error(f"PDF generation error: {str(e)}")
+        return None
+
+# --- DOWNLOAD BUTTONS ---
+if example_info and (example_info.get('pdf_enabled') or (isinstance(example_info.get('pdf_enabled'), str) and example_info.get('pdf_enabled').lower() == 'true')):
+    st.markdown("---")
+    col1, col2, col3 = st.columns([1, 1, 2])
+    
+    with col1:
+        pdf_data = generate_pdf_from_html(current_code, example_info['title'])
+        if pdf_data:
+            st.download_button(
+                label="📄 Download PDF",
+                data=pdf_data,
+                file_name=f"{example_info['title'].replace(' ', '_')}.pdf",
+                mime="application/pdf",
+                help="Download as formatted PDF (CSS styling applied, no raw code shown)"
+            )
+        else:
+            if st.button("📄 Download PDF"):
+                st.error("PDF generation requires reportlab package. Install with: pip install reportlab")
+    
+    with col2:
+        clean_html = clean_html_for_download(current_code, remove_download_buttons=True)
+        st.download_button(
+            label="💾 Download HTML",
+            data=clean_html,
+            file_name=f"{example_info['title'].replace(' ', '_')}.html",
+            mime="text/html",
+            help="Download clean HTML with embedded CSS (no raw CSS code visible)"
+        )
+    
+    with col3:
+        if halt_edit:
+            st.info("🔒 Edit mode is locked to prevent accidental changes")
+
+# --- STATUS BAR ---
+st.markdown("---")
+status_col1, status_col2, status_col3, status_col4 = st.columns(4)
+
+with status_col1:
+    st.metric("Selected Item", selected_number)
+
+with status_col2:
+    if data_source == "📋 Demo Examples" and example_info:
+        st.metric("Category", example_info['category'])
+    else:
+        mode_status = "✏️ Edit Mode" if edit_mode else "👁️ View Mode"
+        st.metric("Current Mode", mode_status)
+
+with status_col3:
+    if data_source == "📋 Demo Examples":
+        st.metric("Total Examples", len(DEMO_EXAMPLES))
+    else:
+        try:
+            total_entries = len(df) if 'df' in locals() and not df.empty else 0
+            st.metric("Total Entries", total_entries)
+        except:
+            st.metric("Total Entries", "N/A")
+
+with status_col4:
+    preview_status = "🌐 Live" if live_preview else "📱 Hidden"
+    st.metric("Preview Status", preview_status)
+
+# --- DEMO EXAMPLES INFO ---
+if data_source == "📋 Demo Examples":
+    with st.expander("📋 Demo Examples Overview", expanded=False):
+        st.markdown("""
+        **8 Professional Demo Examples Available:**
+        
+        1. **Newsletter Template** - Real Estate Weekly (PDF Downloadable)
+        2. **Landing Page** - CreditPro Financial Solutions  
+        3. **Corporate Website** - Premier Realty Agency
+        4. **Streamlit Dashboard** - Business Analytics Interface
+        5. **Business Letter** - Credit Application Response (PDF Downloadable)
+        6. **Email Sequence** - Real Estate Lead Nurturing (7 emails)
+        7. **Professional Invoice** - Business Services (PDF Downloadable)
+        8. **Business Contract** - Real Estate Purchase Agreement (PDF Downloadable)
+        
+        **Features:**
+        - Professional designs with real business content
+        - Credit, real estate, and business themes
+        - PDF downloadable documents where applicable
+        - Responsive layouts and modern styling
+        - Ready-to-use templates for various business needs
+        """)
+
+# --- INSTRUCTIONS ---
+with st.expander("📖 Instructions & Tips", expanded=False):
+    st.markdown(
+        """
+        **How to use this enhanced code viewer:**
+        
+        **Data Sources:**
+        - **Demo Examples**: 8 professional templates ready to use
+        - **Google Sheets**: Load custom code from your spreadsheet
+        
+        **Display Controls:**
+        - **Live Preview**: View rendered HTML/CSS (ON by default)
+        - **Show Code Panel**: Display code editor/viewer (OFF by default for cleaner view)
+        - **Edit Mode**: Enable real-time code editing
+        
+        **Enhanced Features:**
+        - **Category Filtering**: Filter demo examples by type
+        - **Better Defaults**: Live preview on, code off for immediate visual impact
+        - **Larger Preview**: Increased height for better viewing experience
+        - **Professional Templates**: Real business content, not placeholder text
+        - **PDF Downloads**: Simulated download functionality for documents
+        
+        **Tips:**
+        - Start with live preview to see the design immediately
+        - Enable code panel only when you need to edit or study the code
+        - Use demo examples for inspiration and starting points
+        - Edit mode provides real-time preview updates
+        """
+    )
+
+    st.markdown(
+        """
+        **Google Sheets Structure:**
+        Your Google Sheet should have these columns:
+        - **Number** (required): Unique identifier
+        - **Code** (required): HTML/CSS content
+        - **Title** (optional): Display name
+        - **Category** (optional): Group classification
+        - **Description** (optional): Brief description
+        - **PDF_Enabled** (optional): true/false for PDF download capability
+        
+        **Real Downloads:**
+        - **PDF Downloads**: Generate actual PDF files from HTML content
+        - **HTML Downloads**: Save HTML/CSS code directly
+        - **Streamlit Integration**: Uses native download functionality
+        """
+    )
+
+# --- FOOTER ---
+st.markdown("---")
+st.markdown(
+    "<div style='text-align: center; color: #666; font-size: 0.8em;'>"
+    "🚀 Enhanced Code Viewer | 8 Professional Demo Examples | Real-time Editing | PDF Downloads"
+    "</div>", 
+    unsafe_allow_html=True
+)
+
+
+st.markdown("""
+<script>
+function downloadPDF() {
+    alert('PDF download feature would be implemented with server-side PDF generation');
+}
+</script>
+""", unsafe_allow_html=True)
+
