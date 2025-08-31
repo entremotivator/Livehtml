@@ -1879,8 +1879,6 @@ if example_info:
         else:
             if st.button("📄 Download PDF"):
                 st.error("PDF generation requires reportlab package")
-        else:
-            st.write("")  # Empty space for alignment
     
     with col2:
         clean_html = clean_html_for_download(current_code, remove_download_buttons=True)
@@ -2018,3 +2016,4 @@ function downloadPDF() {
 }
 </script>
 """, unsafe_allow_html=True)
+
